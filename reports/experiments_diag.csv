@@ -1,0 +1,4 @@
+tarih,EXP,imgsz,conf,fire_mAP50_val,fire_mAP50_train,fire_kare_yakalama,fire_yanlis_alarm,fire_sahne_ort_yakalama,fire_piksel_R,fire_piksel_P,fire_R@0.5,smoke_mAP50_val,smoke_mAP50_train,smoke_kare_yakalama,smoke_yanlis_alarm,smoke_sahne_ort_yakalama,smoke_piksel_R,smoke_piksel_P,smoke_R@0.5
+2026-10-22 04:56,E04_y11s_640_aug,640,0.25,0.422,0.876,91.7,0.8,80.6,0.749,0.911,0.337,0.76,0.977,89.4,0.6,86.8,0.9,0.862,0.702
+2026-10-22 06:31,E05_y11s_640_dfire,640,0.25,0.498,0.889,91.9,1.0,75.5,0.734,0.92,0.364,0.824,0.985,89.7,1.1,88.4,0.883,0.87,0.743
+2026-10-22 11:21,E06_y11m_640_dfire,640,0.25,0.532,0.874,91.9,1.8,73.7,0.78,0.921,0.452,0.815,0.981,85.6,1.9,87.4,0.829,0.879,0.678

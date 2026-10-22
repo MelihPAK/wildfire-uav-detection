@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+# büyük dosyalar Releases'ta
+models/*.onnx
+*.mp4
+*.pt
