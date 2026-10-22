@@ -96,7 +96,11 @@ Download `firesmoke_y11s_640.onnx` from **Releases** into `models/`, then:
 pip install -r requirements.txt
 python predict.py --model models/firesmoke_y11s_640.onnx --source drone.mp4 --out result.mp4
 python predict.py --model models/firesmoke_y11s_640.onnx --source frames/ --out annotated/
+# long videos: analyse every 5th frame (30 fps → 6 fps, ~5× faster); the alarm window then counts analysed frames
+python predict.py --model models/firesmoke_y11s_640.onnx --source drone.mp4 --out result.mp4 --stride 5
 ```
+
+The output video is scaled to at most 1280 px wide (`--out-width`, detection itself runs on the full frame); a JSON log with per-frame detections, alarm state and timestamps is written next to it.
 
 **Checks.** In a unit test `predict.py` matches Ultralytics' own ONNX inference box-for-box. Against PyTorch inference on 200 test images, 84 % of boxes match at IoU > 0.9 with a mean confidence difference of 0.02. The most likely cause is that Ultralytics runs PyTorch on rectangular input (e.g. 640×480) while the exported model uses a fixed 640×640 letterbox; the comparison included boxes down to conf 0.05, where small shifts matter most.
 

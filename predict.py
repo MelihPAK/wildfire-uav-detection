@@ -2,6 +2,7 @@
 
 Kullanım:
     python predict.py --model firesmoke_y11s_640.onnx --source video.mp4 --out sonuc.mp4
+    python predict.py --model firesmoke_y11s_640.onnx --source video.mp4 --out sonuc.mp4 --stride 5
     python predict.py --model firesmoke_y11s_640.onnx --source kareler/ --out cikti/
     python predict.py --model firesmoke_y11s_640.onnx --source tek.jpg --out tek_sonuc.jpg
 
@@ -116,28 +117,35 @@ def natural_key(p):
     return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', p.name)]
 
 
-def frames_from(source):
+def frames_from(source, stride=1):
+    """(ad, kare, saniye) üretir. stride > 1 ise her stride'ıncı kare işlenir (videoda aradakiler çözülmeden atlanır)."""
     src = Path(source)
     if not src.exists():
         raise SystemExit(f'Kaynak bulunamadı: {src.resolve()}  (dosya adını ve klasörü kontrol et)')
     if src.is_dir():
-        for p in sorted((q for q in src.iterdir() if q.suffix.lower() in IMG_EXT), key=natural_key):
-            yield p.name, cv2.imread(str(p))
+        files = sorted((q for q in src.iterdir() if q.suffix.lower() in IMG_EXT), key=natural_key)
+        for p in files[::stride]:
+            yield p.name, cv2.imread(str(p)), None
     elif src.suffix.lower() in VID_EXT:
         cap = cv2.VideoCapture(str(src))
         if not cap.isOpened() or cap.get(cv2.CAP_PROP_FRAME_COUNT) == 0:
             raise SystemExit(f'Video açılamadı: {src.name} — OpenCV bu codec\'i (ör. AV1) çözemiyor olabilir; '
                              'H.264 bir sürüm dene.')
-        i = 0
+        fps, i = cap.get(cv2.CAP_PROP_FPS) or 0, 0
         while True:
+            if i % stride:
+                if not cap.grab():                                      # atla: çözmeden geç (hızlı)
+                    break
+                i += 1
+                continue
             ok, f = cap.read()
             if not ok:
                 break
-            yield f'frame{i:06d}', f
+            yield f'frame{i:06d}', f, (i / fps if fps else None)
             i += 1
         cap.release()
     else:
-        yield src.name, cv2.imread(str(src))
+        yield src.name, cv2.imread(str(src)), None
 
 
 def main():
@@ -149,23 +157,38 @@ def main():
     ap.add_argument('--conf-smoke', type=float, default=0.30)
     ap.add_argument('--k', type=int, default=3, help='alarm için son N karenin kaçında tespit olmalı')
     ap.add_argument('--n', type=int, default=5, help='zaman penceresi (kare)')
-    ap.add_argument('--fps', type=float, default=None, help='çıktı videosunun FPS değeri (varsayılan: kaynak ya da 5)')
+    ap.add_argument('--fps', type=float, default=None, help='çıktı videosunun FPS değeri (varsayılan: kaynak FPS / stride)')
+    ap.add_argument('--stride', type=int, default=1,
+                    help='her kaçıncı kare işlensin (ör. 30 FPS videoda 5 → saniyede 6 kare; ~5 kat hızlı). '
+                         'K/N işlenen kareler üzerinden sayılır.')
+    ap.add_argument('--out-width', type=int, default=1280,
+                    help='çıktı videosu/görüntüsünün en büyük genişliği (tespit tam çözünürlükte yapılır; 0 = küçültme)')
     a = ap.parse_args()
 
     det = Detector(a.model, conf={0: a.conf_fire, 1: a.conf_smoke})
     filt = {c: AlarmFilter(a.k, a.n) for c in det.names}
     out = Path(a.out)
     src_is_video = Path(a.source).suffix.lower() in VID_EXT
-    fps = a.fps or (cv2.VideoCapture(a.source).get(cv2.CAP_PROP_FPS) if src_is_video else 5) or 5
+    stride = max(1, a.stride)
+    src_fps = cv2.VideoCapture(a.source).get(cv2.CAP_PROP_FPS) if src_is_video else 0
+    fps = a.fps or (src_fps / stride if src_fps else 5)
+    total = int(cv2.VideoCapture(a.source).get(cv2.CAP_PROP_FRAME_COUNT)) // stride if src_is_video else None
     writer, log, t0 = None, [], time.time()
-    for k, (name, img) in enumerate(frames_from(a.source)):
+    for k, (name, img, sec) in enumerate(frames_from(a.source, stride)):
         if img is None:
             continue
         d = det(img)
         alarms = {c: filt[c].update(any(x[0] == c for x in d)) for c in filt}
-        vis = draw(img, d, alarms, det.names, info=name)
-        log.append({'kare': name, 'tespit': [[det.names[x[0]], round(x[1], 3)] for x in d],
+        vis = draw(img, d, alarms, det.names, info=name if sec is None else f'{name}  {sec:6.1f} sn')
+        if a.out_width and vis.shape[1] > a.out_width:
+            vis = cv2.resize(vis, (a.out_width, int(round(vis.shape[0] * a.out_width / vis.shape[1] / 2)) * 2),
+                             interpolation=cv2.INTER_AREA)
+        log.append({'kare': name, 'sn': None if sec is None else round(sec, 2),
+                    'tespit': [[det.names[x[0]], round(x[1], 3)] for x in d],
                     'alarm': [det.names[c] for c, v in alarms.items() if v]})
+        if total and (k + 1) % 100 == 0:
+            el = time.time() - t0
+            print(f'  {k + 1}/{total} kare · {el:.0f} sn · kalan ~{el / (k + 1) * (total - k - 1):.0f} sn', flush=True)
         if out.suffix.lower() in VID_EXT:
             if writer is None:
                 out.parent.mkdir(parents=True, exist_ok=True)
@@ -185,9 +208,12 @@ def main():
     if not log:
         raise SystemExit('Hiç kare okunamadı — kaynak boş ya da okunamıyor.')
     dt = time.time() - t0
-    first = next((r['kare'] for r in log if r['alarm']), None)
-    summary = {'kare': len(log), 'sure_sn': round(dt, 1), 'kare_basina_ms': round(1000 * dt / max(len(log), 1), 1),
-               'alarmli_kare': sum(bool(r['alarm']) for r in log), 'ilk_alarm': first}
+    first = next((r for r in log if r['alarm']), None)
+    n_al = sum(bool(r['alarm']) for r in log)
+    summary = {'kare': len(log), 'stride': stride, 'sure_sn': round(dt, 1),
+               'kare_basina_ms': round(1000 * dt / max(len(log), 1), 1),
+               'alarmli_kare': n_al, 'alarmli_kare_%': round(100 * n_al / len(log), 1),
+               'ilk_alarm': None if first is None else (first['kare'] if first['sn'] is None else f"{first['kare']} ({first['sn']} sn)")}
     (out.with_suffix('.json') if out.suffix else out / 'log.json').write_text(
         json.dumps({'ozet': summary, 'kareler': log}, ensure_ascii=False, indent=1))
     print(json.dumps(summary, ensure_ascii=False))
