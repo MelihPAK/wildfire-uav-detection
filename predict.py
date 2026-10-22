@@ -118,11 +118,16 @@ def natural_key(p):
 
 def frames_from(source):
     src = Path(source)
+    if not src.exists():
+        raise SystemExit(f'Kaynak bulunamadı: {src.resolve()}  (dosya adını ve klasörü kontrol et)')
     if src.is_dir():
         for p in sorted((q for q in src.iterdir() if q.suffix.lower() in IMG_EXT), key=natural_key):
             yield p.name, cv2.imread(str(p))
     elif src.suffix.lower() in VID_EXT:
         cap = cv2.VideoCapture(str(src))
+        if not cap.isOpened() or cap.get(cv2.CAP_PROP_FRAME_COUNT) == 0:
+            raise SystemExit(f'Video açılamadı: {src.name} — OpenCV bu codec\'i (ör. AV1) çözemiyor olabilir; '
+                             'H.264 bir sürüm dene.')
         i = 0
         while True:
             ok, f = cap.read()
@@ -177,6 +182,8 @@ def main():
             cv2.imwrite(str(out / f'{Path(name).stem}.jpg'), vis)
     if writer is not None:
         writer.release()
+    if not log:
+        raise SystemExit('Hiç kare okunamadı — kaynak boş ya da okunamıyor.')
     dt = time.time() - t0
     first = next((r['kare'] for r in log if r['alarm']), None)
     summary = {'kare': len(log), 'sure_sn': round(dt, 1), 'kare_basina_ms': round(1000 * dt / max(len(log), 1), 1),
